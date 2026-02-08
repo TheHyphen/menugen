@@ -1,0 +1,12 @@
+name = "menugen-api"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+
+[vars]
+JWT_SECRET = "change-me-in-production"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "menugen-db"
+database_id = "placeholder-update-after-creation"
+migrations_dir = "migrations"
