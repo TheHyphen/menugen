@@ -34,8 +34,24 @@ jobs:
         id: create_db
         working-directory: packages/backend
         run: |
-          # Check if the database already exists
-          EXISTING=$(npx wrangler d1 list --json 2>/dev/null | jq -r '.[] | select(.name=="menugen-db") | .uuid' || true)
+          # List existing databases — wrangler may print non-JSON lines before the array,
+          # so we strip everything up to the first '[' before feeding it to jq.
+          RAW=$(npx wrangler d1 list 2>/dev/null || true)
+          echo "--- wrangler d1 list output ---"
+          echo "$RAW"
+          echo "-------------------------------"
+
+          # Try to extract UUID for our database. Handles both --json and plain text.
+          EXISTING=""
+          # Attempt JSON parse: grab from first '[' to end, then query with jq
+          JSON_PART=$(echo "$RAW" | sed -n '/^\[/,$ p')
+          if [ -n "$JSON_PART" ]; then
+            EXISTING=$(echo "$JSON_PART" | jq -r '.[] | select(.name=="menugen-db") | .uuid' 2>/dev/null || true)
+          fi
+          # Fallback: plain-text grep for a UUID on the same line as menugen-db
+          if [ -z "$EXISTING" ] || [ "$EXISTING" = "null" ]; then
+            EXISTING=$(echo "$RAW" | grep 'menugen-db' | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
+          fi
 
           if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
             echo "Database already exists with ID: $EXISTING"
@@ -45,7 +61,14 @@ jobs:
             echo "Creating D1 database..."
             OUTPUT=$(npx wrangler d1 create menugen-db 2>&1)
             echo "$OUTPUT"
-            DB_ID=$(echo "$OUTPUT" | grep -oP 'database_id\s*=\s*"\K[^"]+')
+            # Try multiple patterns to extract the database ID
+            DB_ID=$(echo "$OUTPUT" | grep -oP 'database_id\s*=\s*"\K[^"]+' || true)
+            if [ -z "$DB_ID" ]; then
+              DB_ID=$(echo "$OUTPUT" | grep -oP '"uuid"\s*:\s*"\K[^"]+' || true)
+            fi
+            if [ -z "$DB_ID" ]; then
+              DB_ID=$(echo "$OUTPUT" | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
+            fi
             if [ -z "$DB_ID" ]; then
               echo "::error::Failed to extract database ID from wrangler output"
               exit 1
